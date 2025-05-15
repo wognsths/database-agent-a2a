@@ -1,0 +1,24 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN echo "Listing directory contents:" && ls -la && \
+    echo "Python path:" && python -c "import sys; print(sys.path)" && \
+    echo "Available modules:" && pip list
+
+EXPOSE 10001
+
+COPY docker/start-agent.sh /start-agent.sh
+RUN chmod +x /start-agent.sh
+
+CMD ["/start-agent.sh"]

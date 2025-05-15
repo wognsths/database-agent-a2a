@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: demo-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db_init.sql:/docker-entrypoint-initdb.d/db_init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  db-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.db-service
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=${DB_NAME}
+      - TEST_MODE=False
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  database-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - TEST_MODE=False
+      - PYTHONPATH=/app
+      - LOG_LEVEL=DEBUG
+      - API_HOST=http://database-agent:10001
+    ports:
+      - "10001:10001"
+    volumes:
+      - ./:/app
+    depends_on:
+      - db-service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.streamlit
+    environment:
+      - API_HOST=http://database-agent:10001
+    ports:
+      - "8501:8501"
+    depends_on:
+      - database-agent
+
+volumes:
+  pg_data:

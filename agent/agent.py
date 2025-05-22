@@ -51,21 +51,42 @@ class DBAgent:
         inputs = {"messages": [("user", query)]}
         config = {"configurable": {"thread_id": session_id}}
 
+        last_tool: Optional[str] = None
+
         for item in self.graph.stream(inputs, config, stream_mode="values"):
             message = item["messages"][-1]
             if isinstance(message, AIMessage) and message.tool_calls:
+                last_tool = message.tool_calls[0]['name']
                 yield {
                     "is_task_complete": False,
                     "require_user_input": False,
-                    "content": f"Calling tool `{message.tool_calls[0]['name']}` with arguments {message.tool_calls[0]['arguments']}"
+                    "content": f"Calling tool `{last_tool}` with arguments {message.tool_calls[0]['arguments']}"
                 }
             elif isinstance(message, ToolMessage):
-                yield {
-                    "is_task_complete": False,
-                    "require_user_input": False,
-                    "data": message.content,
-                    "content": "Returns the results of tool execution."
-                }
+                if last_tool == "execute_query":
+                    result = message.content
+                    if not result.get("success", False):
+                        yield {
+                            "is_task_complete": False,
+                            "require_user_input": False,
+                            "data": None,
+                            "content": f"SQL Error: {result.get('error_message')}. Retrying..."
+                        }
+                        continue
+                    data = result.get("data")
+                    yield {
+                        "is_task_complete": False,
+                        "require_user_input": False,
+                        "data": data,
+                        "content": "Here are the results of your query."
+                    }
+                else:
+                    yield {
+                        "is_task_complete": False,
+                        "require_user_input": False,
+                        "data": message.content,
+                        "content": f"Returns the results of tool execution of {last_tool}"
+                    }
 
         current_state = self.graph.get_state(config)
         structured_response = current_state.values.get("structured_response")
@@ -74,7 +95,7 @@ class DBAgent:
                 "is_task_complete": structured_response.status == "completed",
                 "require_user_input": structured_response.status == "input_required",
                 "data": structured_response.data,
-                "content": structured_response.message
+                "content": structured_response.content
             }
         else:
             yield {
